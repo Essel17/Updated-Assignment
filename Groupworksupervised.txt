@@ -1,0 +1,105 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Set up the Streamlit app
+st.set_page_config(page_title="Group 4 Churn Predictor", layout="wide")
+st.title("Group 4 Customer Churn Prediction App")
+
+# Upload file
+uploaded_file = st.file_uploader("Upload your Excel or CSV file", type=["xlsx", "csv"])
+
+if uploaded_file:
+    # Load dataset
+    if uploaded_file.name.endswith('.csv'):
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = pd.read_excel(uploaded_file, engine='openpyxl')
+
+    st.subheader("Raw Data")
+    st.dataframe(df.head())
+
+    # Drop rows with missing target or ID
+    df['TotalCharges'] = pd.to_numeric(df['TotalCharges'], errors='coerce')
+    df.dropna(inplace=True)
+    if 'customerID' in df.columns:
+        df.drop(columns=['customerID'], inplace=True)
+
+    # Identify categorical and numerical columns
+    categorical_cols = df.select_dtypes(include='object').columns.tolist()
+    if 'Churn' in categorical_cols:
+        categorical_cols.remove('Churn')
+    numerical_cols = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
+    if 'Churn' in numerical_cols:
+        numerical_cols.remove('Churn')
+
+    # Encode categorical columns
+    df_encoded = df.copy()
+    label_encoders = {}
+    for col in categorical_cols:
+        le = LabelEncoder()
+        df_encoded[col] = le.fit_transform(df_encoded[col])
+        label_encoders[col] = le
+    if 'Churn' in df.columns:
+        df_encoded['Churn'] = df['Churn'].map({'No': 0, 'Yes': 1})
+
+    # Scale numerical columns
+    scaler = StandardScaler()
+    df_encoded[numerical_cols] = scaler.fit_transform(df_encoded[numerical_cols])
+
+    # Train/test split
+    X = df_encoded.drop(columns=['Churn'])
+    y = df_encoded['Churn']
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Train models
+    log_model = LogisticRegression(max_iter=1000)
+    tree_model = DecisionTreeClassifier()
+    log_model.fit(X_train, y_train)
+    tree_model.fit(X_train, y_train)
+
+    # Evaluation
+    st.subheader("Model Evaluation")
+    st.text("Logistic Regression")
+    st.text(classification_report(y_test, log_model.predict(X_test)))
+    st.text("Decision Tree")
+    st.text(classification_report(y_test, tree_model.predict(X_test)))
+
+    # Feature importance
+    st.subheader("Feature Importance (Decision Tree)")
+    importances = tree_model.feature_importances_
+    indices = np.argsort(importances)[-10:]
+    fig, ax = plt.subplots()
+    sns.barplot(x=importances[indices], y=X.columns[indices], ax=ax)
+    st.pyplot(fig)
+
+    # Prediction form
+    st.subheader("🔮 Predict Customer Churn")
+    input_data = {}
+    for col in categorical_cols:
+        options = df[col].unique().tolist()
+        input_data[col] = st.selectbox(f"{col}", options)
+    for col in numerical_cols:
+        min_val = float(df[col].min())
+        max_val = float(df[col].max())
+        mean_val = float(df[col].mean())
+        input_data[col] = st.slider(f"{col}", min_val, max_val, mean_val)
+
+    if st.button("Predict"):
+        input_df = pd.DataFrame([input_data])
+        for col in categorical_cols:
+            le = label_encoders[col]
+            input_df[col] = le.transform(input_df[col])
+        input_df[numerical_cols] = scaler.transform(input_df[numerical_cols])
+        prediction = log_model.predict(input_df)[0]
+        prob = log_model.predict_proba(input_df)[0][prediction]
+        st.success(f"Prediction: {'Churn' if prediction == 1 else 'No Churn'} with confidence {prob:.2%}")
+else:
+    st.info("Please upload an Excel or CSV file to begin.")
